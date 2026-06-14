@@ -1,0 +1,22 @@
+{
+    "name": "zjk/easy-migrate",
+    "autoload": {
+        "psr-4": {
+            "Zjk\\EasyMigrate\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "zjk"
+        }
+    ],
+    "require": {
+        "zjk/db-interface": "v0.1.0"
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/hellolemon030-wq/dbInterface.git"
+        }
+    ]
+}
