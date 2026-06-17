@@ -49,23 +49,29 @@ $migrater->addInit($init);
 // 機能のinitialize
 $migrater->migrateInit();
 
-try{
-    // 自动迁移
-    $migrater->autoMigrate($init->projectId);
-} catch(AutoMigrateException $e){
-    // 例の中に、わざとエラーを発生させる場合がある
-    $errorInitInstance = $e->lastErrorInitInstall;
-    $errorFile = $e->lastErrorFile;
+$i = 0;
+while(++$i <=3){
+    echo "-----{$i}回目-----\n";
+    try{
+        // 自动迁移
+        $migrater->autoMigrate($init->projectId);
+    } catch(AutoMigrateException $e){
+        // 例の中に、わざとエラーを発生させる場合がある
+        $errorInitInstance = $e->lastErrorInitInstall;
+        $errorFile = $e->lastErrorFile;
 
-    // 手作業で、問題を修復のを模擬する
-    $migrater->repair($errorInitInstance->projectId, $errorFile);
+        echo "          -----fixed-----\n";
+        // 手作業で、問題を修復のを模擬する
+        $migrater->repair($errorInitInstance->projectId, $errorFile);
+    }  catch(Throwable $e){
+        echo $e->getMessage();
 
+// 手作業で、問題を修復のを模擬する
+$migrater->repair($errorInitInstance->projectId, $errorFile);
+        exit;
+    }
 }
 
-
-
-// スムーズに、自動迁移を実行する
-$migrater->autoMigrate($init->projectId);
 
 
 

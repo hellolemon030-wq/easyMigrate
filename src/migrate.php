@@ -2,6 +2,7 @@
 namespace Zjk\EasyMigrate;
 
 use Exception;
+use Throwable;
 use Zjk\DbInterface\DbInterface;
 
 
@@ -18,21 +19,26 @@ class migrate
     }
 
     /**
-     * TODO; 増量更新のサポート；
+     * ```
+     * TODO; 
+     *      差分更新のサポート
+     *      （実際には数万個のファイルであってもそれほど時間はかからないため、現時点ではこのままで問題ない）。
+     * ```
+     * @param string $projectId
      * @throws AutoMigrateException 自動迁移失敗時，拋げられる例外、具体的なproject情報とfile情報が含まれる
      */
     public function autoMigrate($projectId){
         $init = $this->getInitByProjectId($projectId);
-        $files = $this->scanFiles($init->getProjectDir());
+        $files = $this->scanFilesAndSort($init->getProjectDir());
         $projectId = $init->getProjectId();
         foreach ($files as $file) {
             $exists = $this->isExecuted($projectId, $file);
             if ($exists) {
-                self::log("MIGRATE SKIP {$file} already executed",'yellow');
+                self::log(" {$projectId} {$file} already executed skip",'yellow');
                 continue;
             }
             $sql = file_get_contents($file);
-            self::log("MIGRATE START {$file}",'green');
+            self::log(" {$projectId} {$file} start",'green');
 
             $tagetDb = $this->getRunSqlDb($init);
             if($this->containsDDL($sql)){
@@ -40,7 +46,7 @@ class migrate
                     $this->runSql($tagetDb,$sql);    // TODO; DDL問題の説明；
                     $this->markExecuted($projectId, $file);
                 } catch (Exception $e) {
-                    self::log("MIGRATE STOP {$file} failed",'red');
+                    self::log(" {$projectId} {$file} failed",'red');
                     throw AutoMigrateException::generateInstance($e,$init, $file);
                 }
             } else {
@@ -52,38 +58,38 @@ class migrate
                     );
                     $tagetDb->commit();
                     $this->markExecuted($projectId, $file);
-                } catch (Exception $e) {
+                } catch (Throwable $e) {
                     try {
                         $tagetDb->rollback();
-                    } catch (Exception $ignore) {
+                    } catch (Throwable $ignore) {
                         // DDL問題によりtransaction already closed が発生する
                     }
-                    self::log("MIGRATE STOP {$file} failed",'red');
+                    self::log(" {$projectId} {$file} failed",'red');
                     throw AutoMigrateException::generateInstance($e,$init, $file);
                 }
 
             }
-            self::log("MIGRATE END {$file}");
+            self::log(" {$projectId} {$file} end");
         }
     }
 
     /**
-     * 判断 migration 文件是否以 DDL 语句开头。
+     * マイグレーションファイルが DDL 文で始まっているかどうかを判定します。
      *
      * 背景：
-     * MySQL 中 CREATE / ALTER / DROP 等 DDL 语句会触发隐式提交（implicit commit），
-     * 即使外层开启了事务，也可能导致事务提前结束，因此这类文件不适合按事务方式执行。
+     * MySQL では、CREATE / ALTER / DROP などの DDL 文が実行されると暗黙的なコミット（implicit commit）が発生します。
+     * そのため、外側でトランザクションを開始していても途中で終了してしまう可能性があり、こうしたファイルはトランザクション処理には適していません。
      *
-     * 约定：
-     * - 一个 migration 文件只包含同类型 SQL（DDL 或 DML）
-     * - 只检查第一条有效 SQL 语句
-     * - 忽略空行和以 -- / # 开头的注释
+     * ルール：
+     * - 1つのマイグレーションファイルには、同じ種別の SQL（DDL または DML）のみを含めること
+     * - 最初に実行される有効な SQL 文のみをチェックすること
+     * - 空行、および -- や # で始まるコメント行は無視すること
      *
-     * 实现原理：
-     * 1. 去除注释行
-     * 2. 跳过文件开头的空白字符
-     * 3. 获取第一条 SQL 的第一个关键字
-     * 4. 判断该关键字是否属于 DDL（CREATE/ALTER/DROP/TRUNCATE/RENAME）
+     * 処理概要：
+     * 1. コメント行を除去
+     * 2. ファイル先頭の空白文字をスキップ
+     * 3. 最初の SQL の先頭のキーワードを取得
+     * 4. そのキーワードが DDL（CREATE/ALTER/DROP/TRUNCATE/RENAME）に該当するか判定
      *
      * 初めのキーワードを判断　だけ、十分に判断にはできない
      * @param string $sql 
@@ -114,14 +120,64 @@ class migrate
         return md5($projectId . '::' . $fileName);
     }
 
+    /**
+     * ディレクトリ内の SQL ファイルを再帰的にスキャンしてソートします。
+     *
+     * @param string $dir ルートディレクトリ
+     * @param int $maxDepth 最大スキャン階層数（デフォルト: 2層まで）
+     * @return array 相対パスの配列
+     */
+    protected function scanFilesAndSort($dir, $maxDepth = 2)
+    {
+        $files = [];
 
-    protected function scanFiles($dir){
-        $files = glob($dir . '/*.sql');
+        // 最大階層数を超えた場合は処理を終了（0未満でストップ）
+        if ($maxDepth < 0) {
+            return $files;
+        }
+
+        // パス区切り文字をスラッシュに統一し、末尾にスラッシュを付与
+        $dir = rtrim(str_replace('\\', '/', $dir), '/') . '/';
+
+        if (!is_dir($dir)) {
+            return $files;
+        }
+
+        if ($dh = opendir($dir)) {
+            while (($file = readdir($dh)) !== false) {
+                if ($file === '.' || $file === '..') {
+                    continue;
+                }
+
+                $fullPath = $dir . $file;
+
+                if (is_dir($fullPath)) {
+                    // ディレクトリの場合は、階層数をマイナス1して再帰呼び出し
+                    $subFiles = $this->scanFilesAndSort($fullPath, $maxDepth - 1);
+                    $files = array_merge($files, $subFiles);
+                } else {
+                    $pathInfo = pathinfo($fullPath);
+                    if (isset($pathInfo['extension']) && strtolower($pathInfo['extension']) === 'sql') {
+                        $files[] = $fullPath;
+                    }
+                }
+            }
+            closedir($dh);
+        }
+
+        // ファイル名で昇順ソートを行い、実行順序を統一
         sort($files);
         return $files;
     }
 
 
+
+
+    /**
+     * @param string $projectId
+     * @param string $fileName
+     * @return bool
+     */
     protected function isExecuted($projectId, $fileName) {
         $mid = $this->getFileUniqueId($projectId,$fileName);
         $sql = "SELECT status FROM {$this->getTableName()} WHERE project_id=? AND mid=?;";
@@ -133,6 +189,10 @@ class migrate
         return $row && $row['status'] == 1;
     }
 
+    /**
+     * @param string $projectId
+     * @param string $fileName
+     */
     public function markExecuted($projectId, $fileName)
     {
         $mid = $this->getFileUniqueId($projectId,$fileName);
@@ -143,9 +203,13 @@ class migrate
             ON DUPLICATE KEY UPDATE status=1, executed_at=NOW()",
             [$projectId, $mid, $fileName]
         );
-        $this->log("MIGRATE MARK {$projectId} {$fileName} executed");
+        $this->log(" {$projectId} {$fileName} executed");
     }
 
+    /**
+     * @param DbInterface $db
+     * @param string $sql
+     */
     protected function runSql($db,$sql){
         $db->execute($sql);
     }
@@ -158,7 +222,12 @@ class migrate
         return $init->_db ? $init->_db : $this->db;
     }
 
-    // 手作業で、問題を修復する
+    
+    /**
+     * 手作業で、問題を修復する
+     * @param string $projectId
+     * @param string $fileName
+     */
     public function repair($projectId, $fileName){
         $this->markExecuted($projectId, $fileName);
     }
@@ -182,6 +251,9 @@ class migrate
         return $this->_migrateInitTable;
     }
 
+    /**
+     * @param string $tableName
+     */
     public function setTableName($tableName){
         $this->_migrateInitTable = $tableName;
     }
@@ -191,6 +263,7 @@ class migrate
      */
     public $initCache = [];
     /**
+     * @param string $projectDir
      * @return initInstance
      */
     public function getInitByProject($projectDir){
@@ -208,6 +281,7 @@ class migrate
     }
 
     /**
+     * @param string $projectId
      * @return initInstance
      */
     public function getInitByProjectId($projectId){
@@ -217,14 +291,27 @@ class migrate
         return $this->initCache[$projectId];
     }
 
+    /**
+     * @param initInstance $init
+     */
     public function addInit($init){
         $this->initCache[$init->projectId] = $init;
     }
 
+    /**
+     * @param string $projectId
+     * @param string $projectDir
+     * @param string $dbTag
+     * @return string
+     */
     static public function makeConfigJson($projectId,$projectDir,$dbTag){
         return initInstance::makeConfigJson($projectId,$dbTag,$projectDir);
     }
 
+    /**
+     * @param string $msg
+     * @param string $color
+     */
     static public function log($msg,$color = 'green'){
         $echo = $msg . "\n";
         switch($color){

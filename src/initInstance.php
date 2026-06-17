@@ -2,6 +2,7 @@
 namespace Zjk\EasyMigrate;
 
 use Exception;
+use Zjk\DbInterface\DBInterface;
 
 
 class initInstance {
@@ -12,6 +13,9 @@ class initInstance {
     public $projectDir = "";
     public $dbTag = "";
 
+    /**
+     * @var DBInterface
+     */
     public $_db;
 
     public function __construct(){
@@ -28,6 +32,12 @@ class initInstance {
         return $this->dbTag;
     }
 
+    /**
+     * @param string $projectId
+     * @param string $dbTag
+     * @param string $projectDir
+     * @return string
+     */
     static public function makeConfigJson($projectId,$dbTag,$projectDir){
         $json = json_encode([
             "project_id" => $projectId,
@@ -38,6 +48,7 @@ class initInstance {
     }
 
     /**
+     * @param string $projectDir
      * @return self
      */
     static public function loadByProject($projectDir){
@@ -54,6 +65,12 @@ class initInstance {
         return $init;
     }
 
+    /**
+     * 異なるチャネルから設定を読み込みます。
+     * 例えば、特定のディレクトリとその中の特定ファイル名を指定して設定ファイルを読み込むことが可能です。
+     * @param string $json
+     * @return self
+     */
     static public function initByJson($json){
         $init = new self();
         $json = json_decode($json,true);
