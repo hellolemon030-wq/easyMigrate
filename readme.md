@@ -33,12 +33,10 @@ php databeeRepair.php xxxxxxxxxxxx
 ```
 //migrateEngineは、fileNameの順序で実行されます。
 |- a
+    |- yyyy-mm-dd   //dir
+        |- yyyy-mm-dd_xx_カスタマイズ3.sql
     |- yyyy-mm-dd_xx_カスタマイズ1.sql
     |- yyyy-mm-dd_xx_カスタマイズ2.sql
-    |- yyyy-mm-dd_xx_カスタマイズ3.sql
-    |- yyyy-mm-dd_xx_カスタマイズ4.sql
-    |- yyyy-mm-dd_xx_カスタマイズ5.sql
-    |- yyyy-mm-dd_xx_カスタマイズ6.sql
 
 【重要：DDL操作とマイグレーションファイル分割に関するガイドライン】
 
